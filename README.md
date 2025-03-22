@@ -49,20 +49,20 @@ EliteRunPEv2 is a tool designed for advanced process injection techniques, inclu
 ## Setup Instructions
 
 1. **Clone the Repository or Download the Code**:
-   Clone or download the repository where the `EliteRunPEv2` code is stored.
+   Clone or download the repository where the `EliteRunPEv2` C# code is stored. You can use Git to clone the repo or manually download the `.zip` file.
 
 2. **Open the Project**:
-   Open the solution file (`.sln`) in **Visual Studio** or any other C# IDE.
+   Open the `EliteRunPEv2.cs` file in **Visual Studio** or any other C# compatible IDE (such as JetBrains Rider).
 
 3. **Configure the Payload**:
    - The `rawPayload` array in the `Main()` method needs to be filled with the byte array of the payload you want to inject. This is typically a compiled PE (Portable Executable) file (e.g., `.exe`, `.dll`).
    - You can use tools like **CFF Explorer** or **PE-bear** to inspect and extract raw payloads for injection.
 
-4. **Build the Project**:
-   - Build the project to compile the code into an executable.
+4. **Build the Code**:
+   - Build the project in Visual Studio to generate the executable file from the source code.
 
-5. **Ensure a Test Environment**:
-   - Use a **sandbox** or a **virtual machine** to run the compiled executable safely. Make sure that the test environment is isolated from your production system to avoid any potential damage.
+5. **Test in Safe Environment**:
+   - **Critical**: Always use a **sandbox** or a **virtual machine** for testing. Ensure that the test environment is isolated from your production system to avoid any potential damage.
 
 ---
 
